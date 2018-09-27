@@ -93,7 +93,7 @@ def create_model(config):
     encoder_filters = config['conv_filters']
     tlayer = x
     for n_filter in encoder_filters:
-        tlayer = Conv3D(filters=n_filter, strides=2,kernel_size=3, padding='same')(LeakyReLU()(tlayer))
+        tlayer = Conv3D(filters=n_filter, strides=2,kernel_size=3, padding='same',activation='relu')(tlayer)
         tlayer = BatchNormalization()(tlayer) if bool(config.get("batchnorm", False)) else tlayer
 
     tlayer = Flatten()(tlayer)
@@ -119,10 +119,11 @@ def create_model(config):
         print(K.int_shape(tlayer))
         conditional_stack = Concatenate()([tlayer,conditional_downsampled_moving])
         # upconv
-        tlayer = Conv3D(n_filter,kernel_size=3,activation='relu',padding='same')(UpSampling3D(size=2)(conditional_stack))
-
+        #tlayer = Conv3D(n_filter,kernel_size=3,activation='relu',padding='same')(UpSampling3D(size=2)(conditional_stack))
+        tlayer = Conv3DTranspose(n_filter,kernel_size=3,activation='relu',strides=2,padding='same')(conditional_stack)
+    tlayer = Conv3D(encoder_filters[-1],kernel_size=3,activation='relu',padding='same')(tlayer)
     down_conv = Conv3D(16,kernel_size=5,activation='relu',padding='same')(tlayer)
-    velocity_maps = Conv3D(3,kernel_size=5,activation='relu',padding='same')(down_conv)
+    velocity_maps = Conv3D(3,kernel_size=5,activation='relu',padding='same',name="velocityMap")(down_conv)
 
     # TODO: gaussian smoothing
 
@@ -136,7 +137,7 @@ def create_model(config):
 
 
     loss = [empty_loss,cc3D(),smoothness_loss,sampleLoss]
-    lossWeights = [0,1.5,0.0001,0.025]
+    lossWeights = [0,1.5,0.00001,0.025]
     model = Model(inputs=x,outputs=[disp,out,velocity_maps,zLoss])
     model.compile(optimizer=Adam(lr=1e-4),loss=loss,loss_weights=lossWeights,metrics=['accuracy'])
     return model
