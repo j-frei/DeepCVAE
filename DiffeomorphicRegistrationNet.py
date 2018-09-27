@@ -17,7 +17,6 @@ def sampling(args):
     z_log_sigma = args[1]
     batch = K.shape(z_mean)[0]
     dim = K.int_shape(z_mean)[1]
-    print(str(dim)+"löl")
     #flattened_dim = functools.reduce(lambda x,y:x*y,[*dim,3])
     epsilon = tf.reshape(K.random_normal(shape=(batch, dim),dtype=tf.float32),(batch,dim))
     xout = z_mean + K.exp(z_log_sigma) * epsilon
@@ -53,6 +52,7 @@ def toDisplacements(n_squaringScaling):
 
         out = grads
         for i in range(n_squaringScaling):
+            #out = tfVectorFieldExp(out,grids)
             out = out + tfVectorFieldExp(out,grids)
         return out
     return displacementWalk
@@ -75,14 +75,12 @@ def smoothness_loss(true_y,pred_y):
     return 1e-5*tf.reduce_sum(dx+dy+dz, axis=[1, 2, 3, 4])
 
 def sampleLoss(true_y,pred_y):
-    print(K.int_shape(pred_y))
     z_mean = pred_y[:,:,0]
     z_log_sigma = pred_y[:,:,1]
     return - 0.5 * K.mean(1 + z_log_sigma - K.square(z_mean) - K.exp(z_log_sigma), axis=-1)
 
 
 def create_model(config):
-    print(*config['resolution'][0:3])
     input_shape = (*config['resolution'][0:3],2)
 
     x = Input(shape=input_shape)
@@ -113,10 +111,7 @@ def create_model(config):
     tlayer = Reshape(target_shape=(*lowest_resolution,1))(init_decoder_tensor)
 
     for f,n_filter in list(zip(downsampled_scales,reversed(encoder_filters)))[:-1]:
-        print("scaling: {}, filters: {}".format(f,n_filter))
         conditional_downsampled_moving = AveragePooling3D(pool_size=f,padding='same')(Lambda(lambda arg:tf.expand_dims(arg[:,:,:,:,1],axis=4))(x))
-        print(K.int_shape(conditional_downsampled_moving))
-        print(K.int_shape(tlayer))
         conditional_stack = Concatenate()([tlayer,conditional_downsampled_moving])
         # upconv
         #tlayer = Conv3D(n_filter,kernel_size=3,activation='relu',padding='same')(UpSampling3D(size=2)(conditional_stack))

@@ -2,20 +2,10 @@ import os
 from multiprocessing import Process, Queue
 import numpy as np
 from DataLoader import loadOASISData
-from Preprocessing import readNormalizedVolumeByPath
-
-
-def addKeys(config):
-    config['batchsize'] = config.get('batchsize',2)
-    config['split'] = config.get('split',0.8)
-    config['validation'] = config.get('validation',0.1)
-    config['resolution'] = config.get('resolution',(128,128,128))
-    config['spacings'] = config.get('spacings',(1.5,1.5,1.5))
-    return config
-
+from Preprocessing import readNormalizedVolumeByPath, readNormalizedAtlasAndITKAtlas
+import logging
 
 def stream(n_elements,n_processes,config):
-    config = addKeys(config)
     q = Queue(n_elements)
     pcs = []
 
@@ -29,32 +19,26 @@ def stream(n_elements,n_processes,config):
     return q,pcs
 
 
-def loadAtlas(config):
-    if config.get('atlas','') == "vm":
-        atlas_path = os.path.join(os.path.dirname(__file__),"atlas","atlas_norm_resampled.nii.gz")
-    else:
-        atlas_path = os.path.join(os.path.dirname(__file__),"atlas","icbm_avg_152_t1_tal_lin.nii")
-    atlas = readNormalizedVolumeByPath(atlas_path,config)
-
-    if config.get('mask_atlas','') == "yes":
-        atlas_mask_path = os.path.join(os.path.dirname(__file__),"atlas","icbm_avg_152_t1_tal_lin_mask.nii")
-        atlas_mask = readNormalizedVolumeByPath(atlas_mask_path,config)
-        # apply mask
-        return (atlas*(atlas_mask>0.5)).astype("float32")
-    else:
-        return atlas.astype("float32")
+def loadAtlas(config):    
+    atlas_path = os.path.join(os.path.dirname(__file__),"atlas",config.get('atlas','atlas.nii.gz'))
+    atlas,itk_atlas = readNormalizedAtlasAndITKAtlas(atlas_path)
+    if not config.get('resolution') or not config.get('spacing'):
+        config['resolution'] = np.asarray(itk_atlas.GetSize())
+        config['spacing'] = np.asarray(itk_atlas.GetSpacing())
+        logging.info("Setting resolution and spacing according to atlas:\nresolution: {}\nspacing: {}".format(config['resolution'],config['spacing']))
+    return atlas.astype("float32"), itk_atlas
 
 def getBatches(*args):
     q,p_number,config = args
 
     import random
     random.seed(p_number)
+    atlas, itk_atlas = loadAtlas(config)
 
     data = loadOASISData()
     train, test = data[:int(len(data) * config['split'])], data[int(len(data) * config['split']):]
 
     volume_shape = config['resolution']
-    atlas = loadAtlas(config)
 
     data_train = train[int(len(train) * config['validation']):]
 
@@ -63,24 +47,24 @@ def getBatches(*args):
 
         for i in range(config['batchsize']):
             idx_volume = random.choice(list(range(len(data_train))))
-            vol = readNormalizedVolumeByPath( data_train[idx_volume]['img'], config )
+            vol = readNormalizedVolumeByPath( data_train[idx_volume]['img'], itk_atlas )
             minibatch[i,:,:,:,0] = atlas.reshape(volume_shape).astype("float32")
             minibatch[i,:,:,:,1] = vol.reshape(volume_shape).astype("float32")
 
         q.put(minibatch)
 
 def getValidationData(config):
+    atlas, itk_atlas = loadAtlas(config)
     data = loadOASISData()
     train, test = data[:int(len(data) * config['split'])], data[int(len(data) * config['split']):]
     volume_shape = config['resolution']
-    atlas = loadAtlas(config)
 
     data_val = train[:int(len(train) * config['validation'])]
     l = len(data_val)
     val = np.empty(shape=(l,*volume_shape,2))
 
     for i in range(l):
-        vol = readNormalizedVolumeByPath( data_val[i]['img'] ,config )
+        vol = readNormalizedVolumeByPath( data_val[i]['img'], itk_atlas )
         val[i,:,:,:,0] = atlas.reshape(volume_shape).astype("float32")
         val[i,:,:,:,1] = vol.reshape(volume_shape).astype("float32")
     
@@ -88,16 +72,16 @@ def getValidationData(config):
 
 
 def getTestData(config):
+    atlas, itk_atlas = loadAtlas(config)
     data = loadOASISData()
     data_test = data[int(len(data) * config['split']):]
     volume_shape = config['resolution']
-    atlas = loadAtlas(config)
 
     l = len(data_test)
     test = np.empty(shape=(l, *volume_shape, 2))
 
     for i in range(l):
-        vol = readNormalizedVolumeByPath(data_test[i]['img'] ,config )
+        vol = readNormalizedVolumeByPath(data_test[i]['img'], itk_atlas )
         test[i, :, :, :, 0] = atlas.reshape(volume_shape).astype("float32")
         test[i, :, :, :, 1] = vol.reshape(volume_shape).astype("float32")
 

@@ -1,11 +1,10 @@
 import SimpleITK as sitk
 import numpy as np
 
-def resampleImage(img,resolution,spacings):
+def resampleImageByAtlas(img,atlas):
     resampler = sitk.ResampleImageFilter()
-    resampler.SetReferenceImage(img)
-    resampler.SetOutputSpacing(spacings)
-    resampler.SetSize(resolution)
+    resampler.SetReferenceImage(atlas)
+    resampler.SetSize(atlas.GetSize())
     return resampler.Execute(img)
 
 def normalize(npv):
@@ -13,8 +12,13 @@ def normalize(npv):
     ma = npv.max()
     return (npv - mi) / (ma - mi)
 
-def readNormalizedVolumeByPath(vol_path,config):
+def readNormalizedVolumeByPath(vol_path,atlas):
     in_img = sitk.ReadImage(vol_path)
-    resampled = resampleImage(in_img,config.get('resolution',(128,128,128)),config.get('spacings',(1.5,1.5,1.5)))
+    resampled = resampleImageByAtlas(in_img,atlas)
     resampled_np = sitk.GetArrayFromImage(resampled)
     return normalize(resampled_np).astype("float32")
+
+def readNormalizedAtlasAndITKAtlas(vol_path):
+    in_img = sitk.ReadImage(vol_path)
+    resampled_np = sitk.GetArrayFromImage(in_img)
+    return normalize(resampled_np).astype("float32"),in_img

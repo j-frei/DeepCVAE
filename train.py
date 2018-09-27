@@ -2,7 +2,7 @@ import numpy as np
 from keras.callbacks import TensorBoard
 import tensorflow as tf
 import keras
-
+import logging
 import DataGenerator
 from DataLoader import loadOASISData
 from DiffeomorphicRegistrationNet import create_model
@@ -13,14 +13,11 @@ import multiprocessing as mp
 
 #mp.set_start_method("spawn")
 train_config = {
-    'batchsize':2,
+    'batchsize':1,
     'split':0.9,
     'validation':0.1,
-    'resolution':(96,96,96),
-    'spacings':(2.,2.,2.),
     'epochs': 500,
-    'atlas': 'no_vm',
-    'mask_atlas':'yes',
+    'atlas': 'atlas.nii.gz',
     'model_output': 'model.pkl',
     'conv_filters':[32,16,8,4],
     'encoding_dense': 16
@@ -55,6 +52,7 @@ tf.set_random_seed(0)
 sess = tf.keras.backend.get_session()
 with sess.as_default():
     tb = TensorBoard(log_dir='./logs')
+    logging.info("Start Training")
     model.fit_generator(generator=train_generator(),
                         validation_data=[validation_data,validation_data_y],
                         epochs=train_config['epochs'],
