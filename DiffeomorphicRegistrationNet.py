@@ -9,7 +9,8 @@ from keras.models import Model
 from keras.layers import Conv3D, Conv3DTranspose, Dense, BatchNormalization, Input, Concatenate, UpSampling3D, \
     MaxPool3D, K, Flatten, Reshape, Lambda, LeakyReLU, AveragePooling2D, AveragePooling3D
 from losses import cc3D
-from volumetools import volumeGradients, tfVectorFieldExp, remap3d
+from volumetools import volumeGradients, tfVectorFieldExp, remap3d, upsample
+
 
 def sampling(args):
     z_mean = args[0]
@@ -41,6 +42,16 @@ def toDisplacements(steps=7):
         return res
     return exponentialMap
 
+def toUpscaleResampled(args):
+    channel_x = args[:,:,:,:,0]
+    channel_y = args[:,:,:,:,1]
+    channel_z = args[:,:,:,:,2]
+    upsampled_x = upsample(tf.expand_dims(channel_x,-1))
+    upsampled_y = upsample(tf.expand_dims(channel_y,-1))
+    upsampled_z = upsample(tf.expand_dims(channel_z,-1))
+    result = tf.squeeze(tf.stack([upsampled_x,upsampled_y,upsampled_z],4),5)
+    return result
+
 def transformVolume(args):
     x,disp = args
     moving_vol = tf.reshape(x[:,:,:,:,1],(tf.shape(x)[0],tf.shape(x)[1],tf.shape(x)[2],tf.shape(x)[3],1))
@@ -52,8 +63,6 @@ def empty_loss(true_y,pred_y):
 
 def smoothness(batch_size):
     def smoothness_loss(true_y,pred_y):
-        print("11 "+str(K.int_shape(pred_y)))
-        print("11.1 "+str(K.int_shape(tf.expand_dims(pred_y[:,:,:,:,0],-1))))
         y0 = tf.reshape(pred_y[:,:,:,:,0],[tf.shape(pred_y)[0],*K.int_shape(pred_y)[1:4],1])
         y1 = tf.reshape(pred_y[:,:,:,:,1],[tf.shape(pred_y)[0],*K.int_shape(pred_y)[1:4],1])
         y2 = tf.reshape(pred_y[:,:,:,:,2],[tf.shape(pred_y)[0],*K.int_shape(pred_y)[1:4],1])
@@ -61,7 +70,6 @@ def smoothness(batch_size):
         dy = tf.abs(volumeGradients(y1))
         dz = tf.abs(volumeGradients(y2))
         norm = functools.reduce(lambda x,y:x*y,K.int_shape(pred_y)[1:5])*batch_size
-        print(norm)
         return tf.reduce_sum((dx+dy+dz)/norm, axis=[1, 2, 3, 4])
     return smoothness_loss
 
@@ -74,7 +82,6 @@ def sampleLoss(true_y,pred_y):
 def create_model(config):
     input_shape = (*config['resolution'][0:3],2)
     x = Input(shape=input_shape)
-    print("1 "+str(K.int_shape(x)))
     # dimension of latent space (batch size by latent dim)
     n_z = config['encoding_dense']
 
@@ -84,7 +91,6 @@ def create_model(config):
     for n_filter in encoder_filters:
         tlayer = Conv3D(filters=n_filter, strides=2,kernel_size=3, padding='same',activation='relu')(tlayer)
         tlayer = BatchNormalization()(tlayer) if bool(config.get("batchnorm", False)) else tlayer
-        print("2 "+str(K.int_shape(tlayer)))
 
     tlayer = Flatten()(tlayer)
     # dense ReLU layer to mu and sigma
@@ -99,26 +105,34 @@ def create_model(config):
     lowest_dim = functools.reduce(lambda x,y: x*y,lowest_resolution)
 
     init_decoder_tensor = Dense(lowest_dim,activation='relu')(z)
-    print("3 "+str(K.int_shape(z)))
-    print("4 "+str(K.int_shape(init_decoder_tensor)))
 
     tlayer = Reshape(target_shape=(*lowest_resolution,1))(init_decoder_tensor)
-    print("3 "+str(K.int_shape(tlayer)))
 
-    for f,n_filter in list(zip(downsampled_scales,reversed(encoder_filters)))[:-1]:
+    for i,(f,n_filter) in enumerate(list(zip(downsampled_scales,reversed(encoder_filters)))[:-1]):
         conditional_downsampled_moving = AveragePooling3D(pool_size=f,padding='same')(Lambda(lambda arg:tf.expand_dims(arg[:,:,:,:,1],axis=4))(x))
         conditional_stack = Concatenate()([tlayer,conditional_downsampled_moving])
-        # upconv
-        #tlayer = Conv3D(n_filter,kernel_size=3,activation='relu',padding='same')(UpSampling3D(size=2)(conditional_stack))
-        tlayer = Conv3DTranspose(n_filter,kernel_size=3,activation='relu',strides=2,padding='same')(conditional_stack)
-        print("5 "+str(K.int_shape(tlayer)))
-    tlayer = Conv3D(encoder_filters[-1],kernel_size=3,activation='relu',padding='same')(tlayer)
-    print("6 "+str(K.int_shape(tlayer)))
-    down_conv = Conv3D(16,kernel_size=5,activation='relu',padding='same')(tlayer)
-    print("7 "+str(K.int_shape(down_conv)))
-    velocity_maps = Conv3D(3,kernel_size=5,activation='relu',padding='same',name="velocityMap")(down_conv)
-    print("8 "+str(K.int_shape(velocity_maps)))
 
+        if config['half_res'] and (i+1) == len(encoder_filters)-1:
+            # do not perform final upconv
+            tlayer = conditional_stack
+        else:
+            # upconvolve
+            #tlayer = Conv3D(n_filter,kernel_size=3,activation='relu',padding='same')(UpSampling3D(size=2)(conditional_stack))
+            tlayer = Conv3DTranspose(n_filter,kernel_size=3,activation='relu',strides=2,padding='same')(conditional_stack)
+
+    tlayer = Conv3D(encoder_filters[-1], kernel_size=3, activation='relu', padding='same')(tlayer)
+    down_conv = Conv3D(16, kernel_size=5, activation='relu', padding='same')(tlayer)
+    velocity_maps = Conv3D(3, kernel_size=5, activation='relu', padding='same', name="velocityMap")(down_conv)
+
+
+    if config['half_res']:
+        disp_low = Lambda(toDisplacements(steps=config['exponentialSteps']))(velocity_maps)
+        # upsample displacement map
+        disp_upsampled = Lambda(toUpscaleResampled)(disp_low)
+        # we need to fix displacement vectors which are too small after upsampling
+        disp = Lambda(lambda dispMap: tf.scalar_mul(2.,dispMap),name="manifold_walk")(disp_upsampled)
+    else:
+        disp = Lambda(toDisplacements,name="manifold_walk")(velocity_maps)
     # TODO: gaussian smoothing
 
     zLoss = Concatenate(name='zVariationalLoss',axis=2)([
@@ -126,10 +140,7 @@ def create_model(config):
         Lambda(lambda a: tf.expand_dims(a,axis=2))(log_sigma)
     ])
 
-    disp = Lambda(toDisplacements(steps=config['exponentialSteps']),name="manifold_walk")(velocity_maps)
-    print("9 "+str(K.int_shape(disp)))
     out = Lambda(transformVolume,name="img_warp")([x,disp])
-    print("10 "+str(K.int_shape(out)))
 
 
     loss = [empty_loss,cc3D(),smoothness(config['batchsize']),sampleLoss]

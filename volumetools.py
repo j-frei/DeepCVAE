@@ -97,8 +97,6 @@ def upsample(tf_in_vol):
 def volumeGradients(tf_vf):
     # batch_size, xaxis, yaxis, zaxis, depth = \
     shapes = (tf.shape(tf_vf)[0],*K.int_shape(tf_vf)[1:])
-    print(shapes)
-    # batch_size = tf.placeholder("float",shape=None)
     dx = tf_vf[:, 1:, :, :, :] - tf_vf[:, :-1, :, :, :]
     dy = tf_vf[:, :, 1:, :, :] - tf_vf[:, :, :-1, :, :]
     dz = tf_vf[:, :, :, 1:, :] - tf_vf[:, :, :, :-1, :]
