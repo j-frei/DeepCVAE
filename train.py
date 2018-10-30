@@ -47,9 +47,9 @@ tb_writers = [
     ("fixedImage","image",lambda dic: dic['val_X'][:,:,:,:,0].reshape(dic['batchsize'],*train_config['resolution'])[:,:,:,int(train_config['resolution'][2]/2.)].astype("float32").reshape(dic['batchsize'],*train_config['resolution'][:2],1)),
     ("warpedImage","image",lambda dic: dic['pred'][1][:,:,:,:,0].reshape(dic['batchsize'],*train_config['resolution'])[:,:,:,int(train_config['resolution'][2]/2.)].astype("float32").reshape(dic['batchsize'],*train_config['resolution'][:2],1)),
     ("dispField","image",lambda dic: dic['pred'][0][:,:,:,:,0].reshape(dic['batchsize'],*train_config['resolution'])[:,:,:,int(train_config['resolution'][2]/2.)].astype("float32").reshape(dic['batchsize'],*train_config['resolution'][:2],1)),
-    ("velocityFieldX","image",lambda dic: dic['pred'][2][:,:,:,:,0].reshape(dic['batchsize'],*train_config['resolution'])[:,:,:,int(train_config['resolution'][2]/2.)].astype("float32").reshape(dic['batchsize'],*train_config['resolution'][:2],1)),
-    ("velocityFieldY","image",lambda dic: dic['pred'][2][:,:,:,:,1].reshape(dic['batchsize'],*train_config['resolution'])[:,:,:,int(train_config['resolution'][2]/2.)].astype("float32").reshape(dic['batchsize'],*train_config['resolution'][:2],1)),
-    ("velocityFieldZ","image",lambda dic: dic['pred'][2][:,:,:,:,2].reshape(dic['batchsize'],*train_config['resolution'])[:,:,:,int(train_config['resolution'][2]/2.)].astype("float32").reshape(dic['batchsize'],*train_config['resolution'][:2],1)),
+    ("velocityFieldX","image",lambda dic: dic['pred'][2][:,:,:,:,0].reshape(dic['batchsize'],*velo_res)[:,:,:,int(velo_res[2]/2.)].astype("float32").reshape(dic['batchsize'],*velo_res[:2],1)),
+    ("velocityFieldY","image",lambda dic: dic['pred'][2][:,:,:,:,1].reshape(dic['batchsize'],*velo_res)[:,:,:,int(velo_res[2]/2.)].astype("float32").reshape(dic['batchsize'],*velo_res[:2],1)),
+    ("velocityFieldZ","image",lambda dic: dic['pred'][2][:,:,:,:,2].reshape(dic['batchsize'],*velo_res)[:,:,:,int(velo_res[2]/2.)].astype("float32").reshape(dic['batchsize'],*velo_res[:2],1)),
     ("velo","text",lambda dic: "\n".join([ "min: {}\nmax: {}\nX:{}".format(x.min(),x.max(),x) for x in dic['pred'][2][2]])),
     ("disp","text",lambda dic: "\n".join([ "min: {}\nmax: {}\nX:{}".format(x.min(),x.max(),x) for x in dic['pred'][0][2]]))
 ]
